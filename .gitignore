@@ -1,6 +1,5 @@
-
-private/token.txt
-.ipynb_checkpoints/chatBot-announce-checkpoint.ipynb
+private/
+.idea
+venv/
+.ipynb_checkpoints/
 test.ipynb
-private/user_id.db
-.ipynb_checkpoints/test-checkpoint.ipynb
