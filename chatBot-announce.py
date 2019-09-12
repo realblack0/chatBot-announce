@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import telegram
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler
 import time
+import threading
 
 # DB
 engine = create_engine("sqlite:///private/user_id.db", echo=True)
@@ -69,7 +70,7 @@ message_handler = MessageHandler(Filters.text, get_message)
 
 def subscribe_command(bot, update):
     """요청하는 사용자를 공지사항 수신 신청합니다."""
-    user_id=update.message.chat.id
+    user_id = update.message.chat.id
     subs = session.query(User.subscribe).filter(User.user_id == user_id)
     if subs.first()[0] == False:
         subs.update({User.subscribe:True})
@@ -112,12 +113,12 @@ def chatBot():
 
 # Crawler
 def check_update():
-    url = "https://bigdata.seoul.go.kr/noti/selectPageListNoti.do?r_id=P710"
     bot = telegram.Bot(token=my_token)
+    url = "https://bigdata.seoul.go.kr/noti/selectPageListNoti.do?r_id=P710"
     resp = requests.request("get", url)
     dom = BeautifulSoup(resp.text, "lxml")
     previous = dom.select_one(".board_title > a").text.strip()
-    # previous = "test"
+    previous = "test"
 
     while True:
         resp = requests.request("get", url)
@@ -131,8 +132,13 @@ def check_update():
         else:
             time.sleep(60) # 1분마다 체크
 
+
 def main():
-    check_update()
+    # threading.Thread(target=chatBot).start()
+    daemon = threading.Thread(target=check_update)
+    daemon.daemon = True
+    daemon.start()
+    chatBot()
 
 if __name__ == "__main__":
     main()
