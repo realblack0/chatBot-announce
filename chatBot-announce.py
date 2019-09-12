@@ -2,10 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, Boolean
 from sqlalchemy.orm import sessionmaker
-# import requests
-# from bs4 import BeautifulSoup
-# import telegram
+import requests
+from bs4 import BeautifulSoup
+import telegram
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler
+import time
 
 # DB
 engine = create_engine("sqlite:///private/user_id.db", echo=True)
@@ -104,10 +105,34 @@ updater.dispatcher.add_handler(subscribe_command)
 updater.dispatcher.add_handler(unsubscribe_command)
 
 
-def main():
+def chatBot():
     updater.start_polling(timeout=3, clean=True)
     updater.idle()
 
+
+# Crawler
+def check_update():
+    url = "https://bigdata.seoul.go.kr/noti/selectPageListNoti.do?r_id=P710"
+    bot = telegram.Bot(token=my_token)
+    resp = requests.request("get", url)
+    dom = BeautifulSoup(resp.text, "lxml")
+    previous = dom.select_one(".board_title > a").text.strip()
+    # previous = "test"
+
+    while True:
+        resp = requests.request("get", url)
+        dom = BeautifulSoup(resp.text, "lxml")
+        current = dom.select_one(".board_title > a").text.strip()
+        if not previous == current:
+            for user_id in session.query(User.user_id).filter(User.subscribe==True):
+                bot.send_message(chat_id=user_id[0],
+                    text="서울특별시빅데이터캠퍼스에 새로운 공지사항이 게시되었습니다.\n[{}]\n{}".format(current, url))
+            previous = current
+        else:
+            time.sleep(60) # 1분마다 체크
+
+def main():
+    check_update()
 
 if __name__ == "__main__":
     main()
