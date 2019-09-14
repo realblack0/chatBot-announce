@@ -16,7 +16,7 @@ base = declarative_base()
 # ORM
 class User(base):
     __tablename__ = "User"
-    
+
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer)
     username = Column(String)
@@ -35,7 +35,7 @@ session = Session()
 with open("private/token.txt", 'r') as fp:
     my_token = fp.read()
 
-updater = Updater(token=my_token, use_context=False)
+updater = Updater(token=my_token, use_context=True)
 
 # chat-bot
 def start_command(bot, update):
@@ -61,41 +61,57 @@ def start_command(bot, update):
 start_handler = CommandHandler("start", start_command)
 
 
-def get_message(bot, update):
-    update.message.reply_text("서울특별시빅데이터캠퍼스 공지사항 수신을 하시려면 \"/subscribe 수신\", " + \
+def get_message(update, context):
+    context.bot.send_message(chat_id=update.message.chat.id,
+                             text="서울특별시빅데이터캠퍼스 공지사항 수신을 하시려면 \"/subscribe\", " + \
                               "공지사항을 수신하지 않으시려면 \"/unsubscribe\"라고 말씀해주세요." + \
                                 "\n 이외 기능은 준비 중입니다.")
 
 message_handler = MessageHandler(Filters.text, get_message)
 
-def subscribe_command(bot, update):
+def subscribe_command(update, context):
     """요청하는 사용자를 공지사항 수신 신청합니다."""
+    context.bot.send_message(chat_id=update.message.chat_id,
+                             text="처리중입니다.")
+
     user_id = update.message.chat.id
     subs = session.query(User.subscribe).filter(User.user_id == user_id)
     if subs.first()[0] == False:
         subs.update({User.subscribe:True})
         session.commit()
-        update.message.reply_text("서울특별시빅데이터캠퍼스 공지사항 수신을 시작합니다.")
+        context.bot.send_message(chat_id=user_id,
+                                 text="서울특별시빅데이터캠퍼스 공지사항 수신을 시작합니다.")
 
     else:
-        update.message.reply_text("이미 서울특별시빅데이터캠퍼스 공지사항 수신을 신청하셨습니다.")
+        context.bot.send_message(chat_id=user_id,
+                                 text="이미 서울특별시빅데이터캠퍼스 공지사항 수신을 신청하셨습니다.")
 
+
+    context.bot.send_message(chat_id=user_id,
+                             text="처리완료되었습니다.")
 
 subscribe_command = CommandHandler("subscribe", subscribe_command)
 
 
-def unsubscribe_command(bot, update):
+def unsubscribe_command(update, context):
     """요청하는 사용자를 공지사항 수신 거부 처리합니다.
        아직 공지사항 수신을 신청하지 않은 사용자에게는 수신 신청이 되어있지 않다는 메시지를 보냅니다."""
+    context.bot.send_message(chat_id=update.message.chat.id,
+                             text="처리중입니다.")
+
     user_id = update.message.chat.id
     subs = session.query(User.subscribe).filter(User.user_id == user_id)
     if subs.first()[0] == True:
         subs.update({User.subscribe:False})
         session.commit()
-        update.message.reply_text("서울특별시빅데이터캠퍼스 공지사항 수신을 종료합니다.")
+        context.bot.send_message(chat_id=user_id,
+                                 text="서울특별시빅데이터캠퍼스 공지사항 수신을 종료합니다.")
     else:
-        update.message.reply_text("아직 서울특별시빅데이터캠퍼스 공지사항 수신 신청이 되어있지 않습니다.")
+        context.bot.send_message(chat_id=user_id,
+                                 text="아직 서울특별시빅데이터캠퍼스 공지사항 수신 신청이 되어있지 않습니다.")
 
+    context.bot.send_message(chat_id=user_id,
+                             text="처리완료되었습니다.")
 
 unsubscribe_command = CommandHandler("unsubscribe", unsubscribe_command)
 
@@ -106,39 +122,31 @@ updater.dispatcher.add_handler(subscribe_command)
 updater.dispatcher.add_handler(unsubscribe_command)
 
 
+# Crawler
+def check_update(context):
+    url = "https://bigdata.seoul.go.kr/noti/selectPageListNoti.do?r_id=P710"
+    previous = "test"
+
+    resp = requests.request("get", url)
+    dom = BeautifulSoup(resp.text, "lxml")
+    current = dom.select_one(".board_title > a").text.strip()
+    if not previous == current:
+        for user_id in session.query(User.user_id).filter(User.subscribe==True):
+            context.bot.send_message(chat_id=user_id[0],
+                text="서울특별시빅데이터캠퍼스에 새로운 공지사항이 게시되었습니다.\n[{}]\n{}".format(current, url))
+
+
 def chatBot():
+    j = updater.job_queue
+    j.run_repeating(check_update, interval=10, first=0)
+
     updater.start_polling(timeout=3, clean=True)
     updater.idle()
 
 
-# Crawler
-def check_update():
-    bot = telegram.Bot(token=my_token)
-    url = "https://bigdata.seoul.go.kr/noti/selectPageListNoti.do?r_id=P710"
-    resp = requests.request("get", url)
-    dom = BeautifulSoup(resp.text, "lxml")
-    previous = dom.select_one(".board_title > a").text.strip()
-    previous = "test"
-
-    while True:
-        resp = requests.request("get", url)
-        dom = BeautifulSoup(resp.text, "lxml")
-        current = dom.select_one(".board_title > a").text.strip()
-        if not previous == current:
-            for user_id in session.query(User.user_id).filter(User.subscribe==True):
-                bot.send_message(chat_id=user_id[0],
-                    text="서울특별시빅데이터캠퍼스에 새로운 공지사항이 게시되었습니다.\n[{}]\n{}".format(current, url))
-            previous = current
-        else:
-            time.sleep(60) # 1분마다 체크
-
-
 def main():
-    # threading.Thread(target=chatBot).start()
-    daemon = threading.Thread(target=check_update)
-    daemon.daemon = True
-    daemon.start()
     chatBot()
+
 
 if __name__ == "__main__":
     main()
