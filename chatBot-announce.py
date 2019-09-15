@@ -4,14 +4,16 @@ from sqlalchemy import Column, Integer, String, Boolean
 from sqlalchemy.orm import sessionmaker
 import requests
 from bs4 import BeautifulSoup
-import telegram
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler
-import time
-import threading
+import logging
+
 
 # DB
 engine = create_engine("sqlite:///private/user_id.db", echo=True)
 base = declarative_base()
+
+# DB reset
+# base.metadata.drop_all(bind=engine, tables=[User.__table__])
 
 # ORM
 class User(base):
@@ -26,10 +28,10 @@ class User(base):
 
 base.metadata.create_all(engine)
 
-# base.metadata.drop_all(bind=engine, tables=[User.__table__])
 
 Session = sessionmaker(bind=engine)
 session = Session()
+
 
 # Token Read
 with open("private/token.txt", 'r') as fp:
@@ -37,14 +39,26 @@ with open("private/token.txt", 'r') as fp:
 
 updater = Updater(token=my_token, use_context=True)
 
+
+# logging
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
 # chat-bot
-def start_command(bot, update):
+def start_command(update, context):
+    print("/start")
+    context.bot.send_message(chat_id=update.message.chat_id,
+                             text="처리중입니다.")
+
     user_id = update.message.chat.id
     username = update.message.chat.username
     last_name = update.message.chat.last_name
     first_name = update.message.chat.first_name
 
-    if not user_id in session.query(User.user_id):
+    session = Session()
+    if not (user_id,) in session.query(User.user_id).all():
         session.add(
             User(
                 user_id=user_id,
@@ -56,7 +70,8 @@ def start_command(bot, update):
         )
         session.commit()
 
-    update.message.reply_text("반갑습니다! 무엇을 도와드릴까요?")
+    context.bot.send_message(chat_id=user_id,
+        text="반갑습니다! 무엇을 도와드릴까요?")
 
 start_handler = CommandHandler("start", start_command)
 
@@ -71,10 +86,12 @@ message_handler = MessageHandler(Filters.text, get_message)
 
 def subscribe_command(update, context):
     """요청하는 사용자를 공지사항 수신 신청합니다."""
+    print("/subscribe")
     context.bot.send_message(chat_id=update.message.chat_id,
                              text="처리중입니다.")
 
     user_id = update.message.chat.id
+    session = Session()
     subs = session.query(User.subscribe).filter(User.user_id == user_id)
     if subs.first()[0] == False:
         subs.update({User.subscribe:True})
@@ -96,16 +113,18 @@ subscribe_command = CommandHandler("subscribe", subscribe_command)
 def unsubscribe_command(update, context):
     """요청하는 사용자를 공지사항 수신 거부 처리합니다.
        아직 공지사항 수신을 신청하지 않은 사용자에게는 수신 신청이 되어있지 않다는 메시지를 보냅니다."""
+    print("/unsubscribe")
     context.bot.send_message(chat_id=update.message.chat.id,
                              text="처리중입니다.")
-
     user_id = update.message.chat.id
+
+    session = Session()
     subs = session.query(User.subscribe).filter(User.user_id == user_id)
     if subs.first()[0] == True:
         subs.update({User.subscribe:False})
         session.commit()
         context.bot.send_message(chat_id=user_id,
-                                 text="서울특별시빅데이터캠퍼스 공지사항 수신을 종료합니다.")
+                                     text="서울특별시빅데이터캠퍼스 공지사항 수신을 종료합니다.")
     else:
         context.bot.send_message(chat_id=user_id,
                                  text="아직 서울특별시빅데이터캠퍼스 공지사항 수신 신청이 되어있지 않습니다.")
@@ -113,13 +132,11 @@ def unsubscribe_command(update, context):
     context.bot.send_message(chat_id=user_id,
                              text="처리완료되었습니다.")
 
+
 unsubscribe_command = CommandHandler("unsubscribe", unsubscribe_command)
 
 
-updater.dispatcher.add_handler(start_handler)
-updater.dispatcher.add_handler(message_handler)
-updater.dispatcher.add_handler(subscribe_command)
-updater.dispatcher.add_handler(unsubscribe_command)
+
 
 
 # Crawler
@@ -136,16 +153,17 @@ def check_update(context):
                 text="서울특별시빅데이터캠퍼스에 새로운 공지사항이 게시되었습니다.\n[{}]\n{}".format(current, url))
 
 
-def chatBot():
+def main():
     j = updater.job_queue
     j.run_repeating(check_update, interval=10, first=0)
 
+    updater.dispatcher.add_handler(start_handler)
+    updater.dispatcher.add_handler(message_handler)
+    updater.dispatcher.add_handler(subscribe_command)
+    updater.dispatcher.add_handler(unsubscribe_command)
+
     updater.start_polling(timeout=3, clean=True)
     updater.idle()
-
-
-def main():
-    chatBot()
 
 
 if __name__ == "__main__":
