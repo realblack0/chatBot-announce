@@ -1,11 +1,13 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import sessionmaker
 import requests
 from bs4 import BeautifulSoup
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler
 import logging
+from datetime import datetime
+import re
 
 
 # DB
@@ -13,7 +15,8 @@ engine = create_engine("sqlite:///private/user_id.db", echo=True)
 base = declarative_base()
 
 # DB reset
-# base.metadata.drop_all(bind=engine, tables=[User.__table__])
+# base.metadata.drop_all(bind=engine, tables=[Content.__table__])
+# engine.execute("DROP TABLE IF EXISTS content;")
 
 # ORM
 class User(base):
@@ -26,8 +29,16 @@ class User(base):
     last_name = Column(String)
     subscribe = Column(Boolean)
 
-base.metadata.create_all(engine)
+class Content(base):
+    __tablename__ = "Content"
 
+    id = Column(Integer, primary_key=True)
+    title = Column(String)
+    url = Column(String)
+    datetime = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+base.metadata.create_all(engine)
 
 Session = sessionmaker(bind=engine)
 session = Session()
@@ -141,21 +152,33 @@ unsubscribe_command = CommandHandler("unsubscribe", unsubscribe_command)
 
 # Crawler
 def check_update(context):
+    session = Session()
     url = "https://bigdata.seoul.go.kr/noti/selectPageListNoti.do?r_id=P710"
-    previous = "test"
+    previous = session.query(Content.title).order_by(Content.id.desc()).first()
 
     resp = requests.request("get", url)
     dom = BeautifulSoup(resp.text, "lxml")
     current = dom.select_one(".board_title > a").text.strip()
-    if not previous == current:
+    if not previous == (current,):
+        params = {
+            "r_id": "P710",
+              "bbs_seq": re.findall(r"fnDetail\('(.+)'\)", dom.select_one(".board_title > a")["onclick"])[0]
+        }
+        content_url = "?".join([
+            "https://bigdata.seoul.go.kr/noti/selectNoti.do",
+            requests.compat.urlencode(params)
+        ])
+        session.add(Content(title=current,
+                            url=content_url))
+        session.commit()
         for user_id in session.query(User.user_id).filter(User.subscribe==True):
             context.bot.send_message(chat_id=user_id[0],
-                text="서울특별시빅데이터캠퍼스에 새로운 공지사항이 게시되었습니다.\n[{}]\n{}".format(current, url))
+                text="서울특별시빅데이터캠퍼스에 새로운 공지사항이 게시되었습니다.\n[{}]\n{}".format(current, content_url))
 
 
 def main():
     j = updater.job_queue
-    j.run_repeating(check_update, interval=10, first=0)
+    j.run_repeating(check_update, interval=60, first=0)
 
     updater.dispatcher.add_handler(start_handler)
     updater.dispatcher.add_handler(message_handler)
